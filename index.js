@@ -42,6 +42,20 @@ async function connectDb() {
 }
 connectDb();
 
+// ✅ Save/Register User
+app.post("/users", async (req, res) => {
+  const user = req.body;
+  const existing = await usersCollection.findOne({ email: user.email });
+  if (!existing) {
+    user.role = "donor";
+    user.status = "active";
+    const result = await usersCollection.insertOne(user);
+    res.send(result);
+  } else {
+    res.send({ message: "User already exists" });
+  }
+});
+
 // ✅ Root Endpoint
 app.get("/", (req, res) => {
   res.send("PulsePoint Server is Running ✅");
