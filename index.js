@@ -144,6 +144,14 @@ app.post("/blogs", verifyJWT, async (req, res) => {
   res.send(result);
 });
 
+// ✅ Get All Blogs
+app.get("/blogs", async (req, res) => {
+  const status = req.query.status;
+  const filter = status ? { status } : {};
+  const result = await blogsCollection.find(filter).toArray();
+  res.send(result);
+});
+
 // ✅ Root Endpoint
 app.get("/", (req, res) => {
   res.send("PulsePoint Server is Running ✅");
