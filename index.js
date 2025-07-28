@@ -136,6 +136,14 @@ app.get("/fundings", verifyJWT, async (req, res) => {
   res.send(result);
 });
 
+// ✅ Create Blog
+app.post("/blogs", verifyJWT, async (req, res) => {
+  const blog = req.body;
+  blog.status = "draft";
+  const result = await blogsCollection.insertOne(blog);
+  res.send(result);
+});
+
 // ✅ Root Endpoint
 app.get("/", (req, res) => {
   res.send("PulsePoint Server is Running ✅");
