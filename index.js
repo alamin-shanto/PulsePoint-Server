@@ -163,6 +163,14 @@ app.patch("/blogs/:id", verifyJWT, async (req, res) => {
   res.send(result);
 });
 
+// ✅ Delete Blog
+app.delete("/blogs/:id", verifyJWT, async (req, res) => {
+  const result = await blogsCollection.deleteOne({
+    _id: new ObjectId(req.params.id),
+  });
+  res.send(result);
+});
+
 // ✅ Root Endpoint
 app.get("/", (req, res) => {
   res.send("PulsePoint Server is Running ✅");
