@@ -73,6 +73,13 @@ app.patch("/users/:id", verifyJWT, async (req, res) => {
   res.send(result);
 });
 
+// ✅ Get Logged-In User Info
+app.get("/users/:email", verifyJWT, async (req, res) => {
+  const email = req.params.email;
+  const user = await usersCollection.findOne({ email });
+  res.send(user);
+});
+
 // ✅ Root Endpoint
 app.get("/", (req, res) => {
   res.send("PulsePoint Server is Running ✅");
