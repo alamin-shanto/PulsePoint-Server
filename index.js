@@ -88,6 +88,14 @@ app.post("/donation-requests", verifyJWT, async (req, res) => {
   res.send(result);
 });
 
+// ✅ Get All Donation Requests (Admin/Volunteer)
+app.get("/donation-requests", async (req, res) => {
+  const status = req.query.status;
+  const filter = status ? { status } : {};
+  const result = await donationRequestsCollection.find(filter).toArray();
+  res.send(result);
+});
+
 // ✅ Root Endpoint
 app.get("/", (req, res) => {
   res.send("PulsePoint Server is Running ✅");
