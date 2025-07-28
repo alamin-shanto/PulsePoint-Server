@@ -104,6 +104,25 @@ app.get("/donation-requests/user/:email", verifyJWT, async (req, res) => {
   res.send(result);
 });
 
+// ✅ Update Donation Request
+app.patch("/donation-requests/:id", verifyJWT, async (req, res) => {
+  const { id } = req.params;
+  const update = req.body;
+  const result = await donationRequestsCollection.updateOne(
+    { _id: new ObjectId(id) },
+    { $set: update }
+  );
+  res.send(result);
+});
+
+// ✅ Delete Donation Request
+app.delete("/donation-requests/:id", verifyJWT, async (req, res) => {
+  const result = await donationRequestsCollection.deleteOne({
+    _id: new ObjectId(req.params.id),
+  });
+  res.send(result);
+});
+
 // ✅ Root Endpoint
 app.get("/", (req, res) => {
   res.send("PulsePoint Server is Running ✅");
