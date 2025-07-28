@@ -62,6 +62,17 @@ app.get("/users", verifyJWT, async (req, res) => {
   res.send(users);
 });
 
+// ✅ Update User Role or Status
+app.patch("/users/:id", verifyJWT, async (req, res) => {
+  const { id } = req.params;
+  const update = req.body; // e.g. { role: 'admin' } or { status: 'blocked' }
+  const result = await usersCollection.updateOne(
+    { _id: new ObjectId(id) },
+    { $set: update }
+  );
+  res.send(result);
+});
+
 // ✅ Root Endpoint
 app.get("/", (req, res) => {
   res.send("PulsePoint Server is Running ✅");
