@@ -80,6 +80,14 @@ app.get("/users/:email", verifyJWT, async (req, res) => {
   res.send(user);
 });
 
+// ✅ Create Donation Request
+app.post("/donation-requests", verifyJWT, async (req, res) => {
+  const request = req.body;
+  request.status = "pending";
+  const result = await donationRequestsCollection.insertOne(request);
+  res.send(result);
+});
+
 // ✅ Root Endpoint
 app.get("/", (req, res) => {
   res.send("PulsePoint Server is Running ✅");
