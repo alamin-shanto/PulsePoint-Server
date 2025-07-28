@@ -123,6 +123,13 @@ app.delete("/donation-requests/:id", verifyJWT, async (req, res) => {
   res.send(result);
 });
 
+// ✅ Funding
+app.post("/fundings", verifyJWT, async (req, res) => {
+  const fund = req.body;
+  const result = await fundingCollection.insertOne(fund);
+  res.send(result);
+});
+
 // ✅ Root Endpoint
 app.get("/", (req, res) => {
   res.send("PulsePoint Server is Running ✅");
