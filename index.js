@@ -152,6 +152,17 @@ app.get("/blogs", async (req, res) => {
   res.send(result);
 });
 
+// ✅ Publish/Unpublish Blog
+app.patch("/blogs/:id", verifyJWT, async (req, res) => {
+  const { id } = req.params;
+  const update = req.body; // { status: 'published' }
+  const result = await blogsCollection.updateOne(
+    { _id: new ObjectId(id) },
+    { $set: update }
+  );
+  res.send(result);
+});
+
 // ✅ Root Endpoint
 app.get("/", (req, res) => {
   res.send("PulsePoint Server is Running ✅");
