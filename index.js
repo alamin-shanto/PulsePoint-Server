@@ -42,6 +42,25 @@ async function connectDb() {
 }
 connectDb();
 
+// JWT Verify Middleware
+function verifyJWT(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return res.status(401).send({ message: "Unauthorized" });
+  const token = authHeader.split(" ")[1];
+  jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
+    if (err) return res.status(403).send({ message: "Forbidden" });
+    req.decoded = decoded;
+    next();
+  });
+}
+
+// ✅ Generate JWT
+app.post("/jwt", async (req, res) => {
+  const user = req.body;
+  const token = jwt.sign(user, process.env.JWT_SECRET, { expiresIn: "7d" });
+  res.send({ token });
+});
+
 // ✅ Save/Register User
 app.post("/users", async (req, res) => {
   const user = req.body;
