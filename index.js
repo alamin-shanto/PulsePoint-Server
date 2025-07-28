@@ -130,6 +130,12 @@ app.post("/fundings", verifyJWT, async (req, res) => {
   res.send(result);
 });
 
+// ✅ Get All Funding
+app.get("/fundings", verifyJWT, async (req, res) => {
+  const result = await fundingCollection.find().toArray();
+  res.send(result);
+});
+
 // ✅ Root Endpoint
 app.get("/", (req, res) => {
   res.send("PulsePoint Server is Running ✅");
