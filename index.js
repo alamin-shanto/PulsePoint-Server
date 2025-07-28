@@ -56,6 +56,12 @@ app.post("/users", async (req, res) => {
   }
 });
 
+// ✅ Get All Users (Admin)
+app.get("/users", verifyJWT, async (req, res) => {
+  const users = await usersCollection.find().toArray();
+  res.send(users);
+});
+
 // ✅ Root Endpoint
 app.get("/", (req, res) => {
   res.send("PulsePoint Server is Running ✅");
