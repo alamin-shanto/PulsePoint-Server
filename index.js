@@ -96,6 +96,14 @@ app.get("/donation-requests", async (req, res) => {
   res.send(result);
 });
 
+// ✅ Get My Donation Requests (Donor)
+app.get("/donation-requests/user/:email", verifyJWT, async (req, res) => {
+  const result = await donationRequestsCollection
+    .find({ "requester.email": req.params.email })
+    .toArray();
+  res.send(result);
+});
+
 // ✅ Root Endpoint
 app.get("/", (req, res) => {
   res.send("PulsePoint Server is Running ✅");
