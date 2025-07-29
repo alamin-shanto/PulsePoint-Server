@@ -4,16 +4,15 @@ const { MongoClient, ObjectId, ServerApiVersion } = require("mongodb");
 const admin = require("firebase-admin");
 const dotenv = require("dotenv");
 const jwt = require("jsonwebtoken");
-const ServerlessHttp = require("serverless-http");
+const serverlessHttp = require("serverless-http");
 
 dotenv.config();
-console.log("Mongo URI:", process.env.MONGO_URI);
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Firebase Admin Setup with error handling
+// ✅ Firebase Admin Initialization
 try {
   if (!admin.apps.length) {
     admin.initializeApp({
@@ -23,20 +22,17 @@ try {
         )
       ),
     });
-    console.log("Firebase Admin initialized.");
+    console.log("✅ Firebase Admin initialized.");
   }
 } catch (err) {
-  console.error("Firebase initialization error:", err);
+  console.error("❌ Firebase initialization error:", err);
 }
 
-// MongoDB connection caching
+// ✅ MongoDB Setup with caching
 let cachedClient = null;
 let cachedDb = null;
-
 async function connectDb() {
-  if (cachedClient && cachedDb) {
-    return { client: cachedClient, db: cachedDb };
-  }
+  if (cachedClient && cachedDb) return { client: cachedClient, db: cachedDb };
   const client = new MongoClient(process.env.MONGO_URI, {
     serverApi: ServerApiVersion.v1,
   });
@@ -44,11 +40,10 @@ async function connectDb() {
   const db = client.db("PulsePoint");
   cachedClient = client;
   cachedDb = db;
-  console.log("MongoDB connected.");
   return { client, db };
 }
 
-// JWT Verify Middleware
+// ✅ JWT Verification Middleware
 function verifyJWT(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader) return res.status(401).send({ message: "Unauthorized" });
@@ -60,26 +55,63 @@ function verifyJWT(req, res, next) {
   });
 }
 
-// Wrap async handlers to catch errors
+// ✅ Firebase ID Token Verification Middleware
+async function verifyFirebaseToken(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith("Bearer "))
+    return res.status(401).send({ message: "Unauthorized" });
+
+  const idToken = authHeader.split(" ")[1];
+  try {
+    const decodedToken = await admin.auth().verifyIdToken(idToken);
+    req.firebaseUser = decodedToken;
+    next();
+  } catch (error) {
+    console.error("Firebase token verification failed:", error);
+    return res.status(403).send({ message: "Forbidden" });
+  }
+}
+
+// ✅ Async Error Handler Wrapper
 function asyncHandler(fn) {
   return function (req, res, next) {
     Promise.resolve(fn(req, res, next)).catch(next);
   };
 }
 
-// Routes
-
-// Generate JWT
+// 🔐 Generate JWT (after verifying Firebase ID token)
 app.post(
   "/jwt",
   asyncHandler(async (req, res) => {
-    const user = req.body;
-    const token = jwt.sign(user, process.env.JWT_SECRET, { expiresIn: "7d" });
-    res.send({ token });
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith("Bearer "))
+      return res.status(401).send({ message: "Unauthorized" });
+
+    const idToken = authHeader.split(" ")[1];
+    try {
+      const decoded = await admin.auth().verifyIdToken(idToken);
+      const { db } = await connectDb();
+      const usersCollection = db.collection("Users");
+      const userInDb = await usersCollection.findOne({ email: decoded.email });
+
+      const payload = {
+        email: decoded.email,
+        uid: decoded.uid,
+        role: userInDb?.role || "donor",
+      };
+
+      const token = jwt.sign(payload, process.env.JWT_SECRET, {
+        expiresIn: "7d",
+      });
+      res.send({ token });
+    } catch (error) {
+      console.error("JWT issuing failed:", error);
+      res.status(403).send({ message: "Forbidden" });
+    }
   })
 );
 
-// Save/Register User
+// 🔐 Save/Register User
 app.post(
   "/users",
   asyncHandler(async (req, res) => {
@@ -99,23 +131,24 @@ app.post(
   })
 );
 
-// Get All Users (Admin)
+// 🔐 Admin: Get All Users
 app.get(
   "/users",
   verifyJWT,
+  verifyFirebaseToken,
   asyncHandler(async (req, res) => {
     const { db } = await connectDb();
     const usersCollection = db.collection("Users");
-
     const users = await usersCollection.find().toArray();
     res.send(users);
   })
 );
 
-// Update User Role or Status
+// 🔐 Update User Role or Status
 app.patch(
   "/users/:id",
   verifyJWT,
+  verifyFirebaseToken,
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     const update = req.body;
@@ -130,10 +163,11 @@ app.patch(
   })
 );
 
-// Get Logged-In User Info
+// 🔐 Get Logged-In User Info
 app.get(
   "/users/:email",
   verifyJWT,
+  verifyFirebaseToken,
   asyncHandler(async (req, res) => {
     const email = req.params.email;
     const { db } = await connectDb();
@@ -144,10 +178,11 @@ app.get(
   })
 );
 
-// Create Donation Request
+// 🔐 Create Donation Request
 app.post(
   "/donation-requests",
   verifyJWT,
+  verifyFirebaseToken,
   asyncHandler(async (req, res) => {
     const request = req.body;
     request.status = "pending";
@@ -159,7 +194,7 @@ app.post(
   })
 );
 
-// Get All Donation Requests (Admin/Volunteer)
+// 🔓 Public: Get Donation Requests (Optionally by Status)
 app.get(
   "/donation-requests",
   asyncHandler(async (req, res) => {
@@ -173,10 +208,11 @@ app.get(
   })
 );
 
-// Get My Donation Requests (Donor)
+// 🔐 Donor: Get Their Requests
 app.get(
   "/donation-requests/user/:email",
   verifyJWT,
+  verifyFirebaseToken,
   asyncHandler(async (req, res) => {
     const email = req.params.email;
     const { db } = await connectDb();
@@ -189,10 +225,11 @@ app.get(
   })
 );
 
-// Update Donation Request
+// 🔐 Update Donation Request
 app.patch(
   "/donation-requests/:id",
   verifyJWT,
+  verifyFirebaseToken,
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     const update = req.body;
@@ -207,10 +244,11 @@ app.patch(
   })
 );
 
-// Delete Donation Request
+// 🔐 Delete Donation Request
 app.delete(
   "/donation-requests/:id",
   verifyJWT,
+  verifyFirebaseToken,
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     const { db } = await connectDb();
@@ -223,10 +261,11 @@ app.delete(
   })
 );
 
-// Funding
+// 🔐 Create Funding Entry
 app.post(
   "/fundings",
   verifyJWT,
+  verifyFirebaseToken,
   asyncHandler(async (req, res) => {
     const fund = req.body;
     const { db } = await connectDb();
@@ -237,10 +276,11 @@ app.post(
   })
 );
 
-// Get All Funding
+// 🔐 Get All Fundings
 app.get(
   "/fundings",
   verifyJWT,
+  verifyFirebaseToken,
   asyncHandler(async (req, res) => {
     const { db } = await connectDb();
     const fundingCollection = db.collection("Fundings");
@@ -250,10 +290,11 @@ app.get(
   })
 );
 
-// Create Blog
+// 🔐 Create Blog
 app.post(
   "/blogs",
   verifyJWT,
+  verifyFirebaseToken,
   asyncHandler(async (req, res) => {
     const blog = req.body;
     blog.status = "draft";
@@ -265,7 +306,7 @@ app.post(
   })
 );
 
-// Get All Blogs
+// 🔓 Public: Get Blogs (Optionally by Status)
 app.get(
   "/blogs",
   asyncHandler(async (req, res) => {
@@ -279,10 +320,11 @@ app.get(
   })
 );
 
-// Publish/Unpublish Blog
+// 🔐 Publish/Unpublish Blog
 app.patch(
   "/blogs/:id",
   verifyJWT,
+  verifyFirebaseToken,
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     const update = req.body;
@@ -297,32 +339,31 @@ app.patch(
   })
 );
 
-// Delete Blog
+// 🔐 Delete Blog
 app.delete(
   "/blogs/:id",
   verifyJWT,
+  verifyFirebaseToken,
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     const { db } = await connectDb();
     const blogsCollection = db.collection("Blogs");
 
-    const result = await blogsCollection.deleteOne({
-      _id: new ObjectId(id),
-    });
+    const result = await blogsCollection.deleteOne({ _id: new ObjectId(id) });
     res.send(result);
   })
 );
 
-// Root Endpoint
+// ✅ Root
 app.get("/", (req, res) => {
   res.send("PulsePoint Server is Running ✅");
 });
 
-// Global error handler (optional but recommended)
+// ✅ Error handler
 app.use((err, req, res, next) => {
-  console.error("Unhandled Error:", err);
+  console.error("Unhandled error:", err);
   res.status(500).send({ message: "Internal Server Error" });
 });
 
 module.exports = app;
-module.exports.handler = ServerlessHttp(app);
+module.exports.handler = serverlessHttp(app);
