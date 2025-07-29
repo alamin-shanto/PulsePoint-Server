@@ -72,6 +72,17 @@ async function verifyFirebaseToken(req, res, next) {
   }
 }
 
+// ✅ Role Verification Middleware
+function verifyRole(requiredRole) {
+  return (req, res, next) => {
+    const user = req.decoded;
+    if (!user || user.role !== requiredRole) {
+      return res.status(403).send({ message: "Forbidden: Insufficient role" });
+    }
+    next();
+  };
+}
+
 // ✅ Async Error Handler Wrapper
 function asyncHandler(fn) {
   return function (req, res, next) {
@@ -136,6 +147,7 @@ app.get(
   "/users",
   verifyJWT,
   verifyFirebaseToken,
+  verifyRole("admin"),
   asyncHandler(async (req, res) => {
     const { db } = await connectDb();
     const usersCollection = db.collection("Users");
@@ -144,11 +156,12 @@ app.get(
   })
 );
 
-// 🔐 Update User Role or Status
+// 🔐 Admin: Update User Role or Status
 app.patch(
   "/users/:id",
   verifyJWT,
   verifyFirebaseToken,
+  verifyRole("admin"),
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     const update = req.body;
@@ -178,11 +191,12 @@ app.get(
   })
 );
 
-// 🔐 Create Donation Request
+// 🔐 Create Donation Request (Volunteer only)
 app.post(
   "/donation-requests",
   verifyJWT,
   verifyFirebaseToken,
+  verifyRole("volunteer"),
   asyncHandler(async (req, res) => {
     const request = req.body;
     request.status = "pending";
