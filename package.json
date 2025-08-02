@@ -20,6 +20,6 @@
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.16.5",
     "serverless-http": "^3.2.0",
-    "stripe": "^18.3.0"
+    "stripe": "^18.0.0"
   }
 }

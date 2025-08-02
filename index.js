@@ -5,9 +5,11 @@ const admin = require("firebase-admin");
 const dotenv = require("dotenv");
 const jwt = require("jsonwebtoken");
 const serverlessHttp = require("serverless-http");
+const Stripe = require("stripe");
 
 dotenv.config();
 
+const stripe = Stripe(process.env.STRIPE_SECRET);
 const app = express();
 
 app.use(
@@ -47,30 +49,21 @@ async function connectDb() {
   const uri = process.env.MONGODB_URI;
   if (!uri) throw new Error("❌ MONGODB_URI not set");
 
-  const client = new MongoClient(uri, {
-    serverApi: ServerApiVersion.v1,
-  });
-
+  const client = new MongoClient(uri, { serverApi: ServerApiVersion.v1 });
   await client.connect();
+
   const db = client.db("PulsePoint");
   cachedClient = client;
   cachedDb = db;
+
   console.log("✅ MongoDB connected");
   return { db };
 }
 
-(async () => {
-  try {
-    await connectDb();
-  } catch (err) {
-    console.error("❌ MongoDB connect error:", err.message);
-  }
-})();
+connectDb();
 
 function asyncHandler(fn) {
-  return (req, res, next) => {
-    Promise.resolve(fn(req, res, next)).catch(next);
-  };
+  return (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 }
 
 function verifyJWT(req, res, next) {
@@ -111,6 +104,7 @@ app.post(
     const payload = {
       email: decoded.email,
       uid: decoded.uid,
+      name: user?.name || "",
       role: user?.role || "donor",
     };
 
@@ -150,7 +144,7 @@ app.get(
   "/users/:email",
   verifyJWT,
   asyncHandler(async (req, res) => {
-    const email = req.params.email;
+    const { email } = req.params;
     const { db } = await connectDb();
     const user = await db.collection("Users").findOne({ email });
     res.send(user);
@@ -184,6 +178,43 @@ app.patch(
     res.send(result);
   })
 );
+
+// Update user by email
+app.patch(
+  "/users/email/:email",
+  verifyJWT,
+  asyncHandler(async (req, res) => {
+    const { email } = req.params;
+    const update = req.body;
+    const { db } = await connectDb();
+
+    const result = await db
+      .collection("Users")
+      .updateOne({ email }, { $set: update });
+
+    res.send(result);
+  })
+);
+
+app.patch("/users/:id/status", verifyJWT, async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+  const result = await usersCollection.updateOne(
+    { _id: new ObjectId(id) },
+    { $set: { status } }
+  );
+  res.send(result);
+});
+
+app.patch("/users/:id/role", verifyJWT, async (req, res) => {
+  const { id } = req.params;
+  const { role } = req.body;
+  const result = await usersCollection.updateOne(
+    { _id: new ObjectId(id) },
+    { $set: { role } }
+  );
+  res.send(result);
+});
 
 // Donor: Create Request
 app.post(
@@ -219,7 +250,7 @@ app.get(
   "/donation-requests/user/:email",
   verifyJWT,
   asyncHandler(async (req, res) => {
-    const email = req.params.email;
+    const { email } = req.params;
     const { db } = await connectDb();
     const result = await db
       .collection("donationRequests")
@@ -338,12 +369,33 @@ app.get(
   })
 );
 
+// 🆕 Stripe Payment Intent
+app.post(
+  "/create-payment-intent",
+  verifyJWT,
+  asyncHandler(async (req, res) => {
+    const { amount } = req.body;
+
+    if (!amount || amount < 1) {
+      return res.status(400).send({ message: "Invalid amount" });
+    }
+
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: amount * 100, // in cents
+      currency: "usd",
+      payment_method_types: ["card"],
+    });
+
+    res.send({ clientSecret: paymentIntent.client_secret });
+  })
+);
+
 // Root Check
 app.get("/", (req, res) => {
   res.send("PulsePoint Server is Running ✅");
 });
 
-// Error Handler
+// Global Error Handler
 app.use((err, req, res, next) => {
   console.error("❌ Unhandled Error:", err);
   res
