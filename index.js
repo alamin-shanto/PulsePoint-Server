@@ -1,5 +1,6 @@
 const express = require("express");
 const cors = require("cors");
+const path = require("path");
 const { MongoClient, ObjectId, ServerApiVersion } = require("mongodb");
 const admin = require("firebase-admin");
 const dotenv = require("dotenv");
@@ -15,11 +16,16 @@ const app = express();
 app.use(
   cors({
     origin: ["http://localhost:5173", "https://pulsepoint-seven.netlify.app"],
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
     credentials: true,
   })
 );
+
+app.options("*", cors());
 app.use(express.json());
 
+// Logger middleware
 app.use((req, res, next) => {
   console.log(
     `${req.method} ${req.url} - Auth: ${req.headers.authorization || "none"}`
@@ -66,55 +72,39 @@ function asyncHandler(fn) {
   return (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 }
 
+// JWT Middleware
 function verifyJWT(req, res, next) {
   const authHeader = req.headers.authorization;
-  if (!authHeader) return res.status(401).send({ message: "Unauthorized" });
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
 
   const token = authHeader.split(" ")[1];
-  jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
-    if (err) return res.status(403).send({ message: "Forbidden" });
-    req.decoded = decoded;
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = decoded;
     next();
-  });
+  } catch (error) {
+    console.error("❌ JWT verify error:", error.message);
+    return res.status(403).json({ message: "Forbidden", error: error.message });
+  }
 }
 
 function verifyRole(...roles) {
   return (req, res, next) => {
-    if (!roles.includes(req.decoded.role)) {
-      return res.status(403).send({ message: "Forbidden: Insufficient role" });
+    if (!roles.includes(req.user.role)) {
+      return res.status(403).json({ message: "Forbidden: Insufficient role" });
     }
     next();
   };
 }
 
-// JWT Generation
-app.post(
-  "/jwt",
-  asyncHandler(async (req, res) => {
-    const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith("Bearer "))
-      return res.status(401).send({ message: "Unauthorized" });
-
-    const idToken = authHeader.split(" ")[1];
-    const decoded = await admin.auth().verifyIdToken(idToken);
-
-    const { db } = await connectDb();
-    const user = await db.collection("Users").findOne({ email: decoded.email });
-
-    const payload = {
-      email: decoded.email,
-      uid: decoded.uid,
-      name: user?.name || "",
-      role: user?.role || "donor",
-    };
-
-    const token = jwt.sign(payload, process.env.JWT_SECRET, {
-      expiresIn: "7d",
-    });
-
-    res.send({ token });
-  })
-);
+// Serve React App (make sure your React build files are in /build folder)
+app.use(express.static(path.join(__dirname, "build")));
+app.get("*", (req, res) => {
+  res.sendFile(path.join(__dirname, "build", "index.html"));
+});
 
 // Register User
 app.post(
@@ -146,7 +136,12 @@ app.get(
   asyncHandler(async (req, res) => {
     const { email } = req.params;
     const { db } = await connectDb();
+
     const user = await db.collection("Users").findOne({ email });
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
     res.send(user);
   })
 );
@@ -163,7 +158,7 @@ app.get(
   })
 );
 
-// Admin: Update User Role/Status
+// Admin: Update User Role/Status by ID
 app.patch(
   "/users/:id",
   verifyJWT,
@@ -196,27 +191,37 @@ app.patch(
   })
 );
 
-app.patch("/users/:id/status", verifyJWT, async (req, res) => {
-  const { id } = req.params;
-  const { status } = req.body;
-  const result = await usersCollection.updateOne(
-    { _id: new ObjectId(id) },
-    { $set: { status } }
-  );
-  res.send(result);
-});
+// Update user status by ID
+app.patch(
+  "/users/:id/status",
+  verifyJWT,
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { status } = req.body;
+    const { db } = await connectDb();
+    const result = await db
+      .collection("Users")
+      .updateOne({ _id: new ObjectId(id) }, { $set: { status } });
+    res.send(result);
+  })
+);
 
-app.patch("/users/:id/role", verifyJWT, async (req, res) => {
-  const { id } = req.params;
-  const { role } = req.body;
-  const result = await usersCollection.updateOne(
-    { _id: new ObjectId(id) },
-    { $set: { role } }
-  );
-  res.send(result);
-});
+// Update user role by ID
+app.patch(
+  "/users/:id/role",
+  verifyJWT,
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { role } = req.body;
+    const { db } = await connectDb();
+    const result = await db
+      .collection("Users")
+      .updateOne({ _id: new ObjectId(id) }, { $set: { role } });
+    res.send(result);
+  })
+);
 
-// Donor: Create Request
+// Donor: Create Donation Request
 app.post(
   "/donation-requests",
   verifyJWT,
@@ -230,33 +235,57 @@ app.post(
   })
 );
 
-// Public: Get Requests
+// Public: Get Donation Requests (optionally filtered by status)
 app.get(
   "/donation-requests",
   asyncHandler(async (req, res) => {
     const status = req.query.status;
     const filter = status ? { status } : {};
     const { db } = await connectDb();
-    const result = await db
+    const requests = await db
       .collection("donationRequests")
       .find(filter)
       .toArray();
-    res.send(result);
+    res.send(requests);
   })
 );
 
-// Donor: Get Own Requests
+// Donor: Get Own Donation Requests
 app.get(
   "/donation-requests/user/:email",
   verifyJWT,
   asyncHandler(async (req, res) => {
     const { email } = req.params;
     const { db } = await connectDb();
-    const result = await db
+    const requests = await db
       .collection("donationRequests")
-      .find({ "requester.email": email })
+      .find({ requesterEmail: email })
       .toArray();
-    res.send(result);
+    res.send(requests);
+  })
+);
+
+// Public: Get Single Donation Request by ID
+app.get(
+  "/donation-requests/:id",
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { db } = await connectDb();
+
+    try {
+      const request = await db
+        .collection("donationRequests")
+        .findOne({ _id: new ObjectId(id) });
+
+      if (!request) {
+        return res.status(404).json({ message: "Donation request not found" });
+      }
+
+      res.send(request);
+    } catch (err) {
+      console.error("Error fetching request by ID:", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
   })
 );
 
@@ -289,6 +318,24 @@ app.delete(
   })
 );
 
+// Search Donors by Blood Group, Division, District
+app.get(
+  "/donors/search",
+  asyncHandler(async (req, res) => {
+    const { bloodGroup, division, district } = req.query;
+    const { db } = await connectDb();
+    const donorsCollection = db.collection("Users");
+
+    const filter = {};
+    if (bloodGroup) filter.bloodGroup = bloodGroup;
+    if (division) filter.division = division;
+    if (district) filter.district = district;
+
+    const donors = await donorsCollection.find(filter).toArray();
+    res.send(donors);
+  })
+);
+
 // Admin: Add Blog
 app.post(
   "/blogs",
@@ -303,15 +350,15 @@ app.post(
   })
 );
 
-// Public: Get Blogs
+// Public: Get Blogs (optionally filtered by status)
 app.get(
   "/blogs",
   asyncHandler(async (req, res) => {
     const status = req.query.status;
     const filter = status ? { status } : {};
     const { db } = await connectDb();
-    const result = await db.collection("Blogs").find(filter).toArray();
-    res.send(result);
+    const blogs = await db.collection("Blogs").find(filter).toArray();
+    res.send(blogs);
   })
 );
 
@@ -344,32 +391,77 @@ app.delete(
   })
 );
 
-// Admin: Create Funding
+// Create Funding
 app.post(
   "/fundings",
   verifyJWT,
-  verifyRole("admin"),
   asyncHandler(async (req, res) => {
     const fund = req.body;
+    const { role, uid, email } = req.user;
+
+    if (!fund.amount || fund.amount < 1) {
+      return res.status(400).json({ message: "Invalid amount" });
+    }
+
     const { db } = await connectDb();
+
+    // Fetch user by uid or email
+    const user = await db.collection("Users").findOne({
+      $or: [{ uid }, { email }],
+    });
+
+    fund.userId = uid;
+    fund.email = email;
+    fund.userName = user?.name || "Anonymous";
+    if (!fund.date) fund.date = new Date().toISOString();
+
     const result = await db.collection("Fundings").insertOne(fund);
     res.status(201).send(result);
   })
 );
 
-// Admin: Get All Fundings
+// Admin: Get All Fundings with Pagination
 app.get(
   "/fundings",
   verifyJWT,
-  verifyRole("admin"),
   asyncHandler(async (req, res) => {
     const { db } = await connectDb();
-    const result = await db.collection("Fundings").find().toArray();
-    res.send(result);
+
+    const { role, email, uid } = req.user;
+
+    let filter = {};
+
+    if (role !== "admin") {
+      filter = {
+        $or: [{ userId: uid }, { email }],
+      };
+    }
+
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const fundingsCursor = db
+      .collection("Fundings")
+      .find(filter)
+      .sort({ date: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    const fundings = await fundingsCursor.toArray();
+    const totalCount = await db.collection("Fundings").countDocuments(filter);
+    const totalPages = Math.ceil(totalCount / limit);
+
+    res.json({
+      fundings,
+      totalCount,
+      totalPages,
+      currentPage: page,
+    });
   })
 );
 
-// 🆕 Stripe Payment Intent
+// Stripe Payment Intent
 app.post(
   "/create-payment-intent",
   verifyJWT,
@@ -377,16 +469,16 @@ app.post(
     const { amount } = req.body;
 
     if (!amount || amount < 1) {
-      return res.status(400).send({ message: "Invalid amount" });
+      return res.status(400).json({ message: "Invalid amount" });
     }
 
     const paymentIntent = await stripe.paymentIntents.create({
-      amount: amount * 100, // in cents
+      amount: Math.round(amount * 100), // convert dollars to cents, rounded
       currency: "usd",
       payment_method_types: ["card"],
     });
 
-    res.send({ clientSecret: paymentIntent.client_secret });
+    res.json({ clientSecret: paymentIntent.client_secret });
   })
 );
 
@@ -400,7 +492,7 @@ app.use((err, req, res, next) => {
   console.error("❌ Unhandled Error:", err);
   res
     .status(500)
-    .send({ message: "Internal Server Error", error: err.message });
+    .json({ message: "Internal Server Error", error: err.message });
 });
 
 module.exports = app;
